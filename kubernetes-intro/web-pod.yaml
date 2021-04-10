@@ -8,7 +8,7 @@ spec:
       image: musisimaru/otus-homework-01
       ports:
         - name: http
-          containerPort: 8000
+          containerPort: 8080
       volumeMounts:
         - name: app
           mountPath: /usr/local/apache2/htdocs/      
