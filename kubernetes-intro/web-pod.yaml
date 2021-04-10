@@ -1,7 +1,7 @@
 apiVersion: v1 # Версия API
 kind: Pod # Объект, который создаем
 metadata:
-  name: homework-01-web
+  name: web
 spec:
   containers:
     - name: homework-01-web
