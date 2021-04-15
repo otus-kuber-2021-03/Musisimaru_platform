@@ -11,7 +11,7 @@
 
     - Запускаю команду `kind create cluster`
 
-        ![https://s3-us-west-2.amazonaws.com/secure.notion-static.com/2313e3a4-a1c8-4660-8997-26f3c009735f/Untitled.png](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/2313e3a4-a1c8-4660-8997-26f3c009735f/Untitled.png)
+        ![homework-02-part0-screen01](https://user-images.githubusercontent.com/14264908/114895995-a041c280-9e18-11eb-9584-ddfb57ed3d35.png)
 
         Вроде все успешно
 
