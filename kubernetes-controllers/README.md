@@ -645,6 +645,179 @@ Waiting for deployment "frontend" rollout to finish: 1 out of 3 new replicas hav
 
 # Часть 6 ⭐ | DaemonSet
 
-...
+**Взял** первый попавшийся `node-exporter-daemonset.yaml` с [гитхаба](https://github.com/prometheus-operator/kube-prometheus/blob/main/manifests/node-exporter-daemonset.yaml). 
+
+**Создал** namespace `monitoring`
+
+Применяю конфиг. Демон сет создался. Подов не видеть. Смотрю через `describe`. Вижу
+
+```bash
+Events:
+  Type     Reason        Age                   From                  Message
+  ----     ------        ----                  ----                  -------
+  Warning  FailedCreate  48s (x16 over 3m32s)  daemonset-controller  Error creating: pods "node-exporter-" is forbidden: error looking up service account monitoring/node-exporter: serviceaccount "node-exporter" not found
+```
+
+Хмм... надо учетку создавать под него что ли =( Ладно, попробуем по аналогии как делал для дашборда.
+
+```bash
+> kubectl create serviceaccount node-exporter
+serviceaccount/node-exporter created
+
+> kubectl create clusterrolebinding node-exporter --clusterrole=cluster-admin --serviceaccount=default:node-exporter
+clusterrolebinding.rbac.authorization.k8s.io/node-exporter created
+```
+
+**Удаляю** демонсет и пробую еще раз и получаю ту же самую ошибку, ведь я не в том namespace его завел.
+
+**Заново**
+
+```bash
+> kubectl create serviceaccount node-exporter -n monitoring
+serviceaccount/node-exporter created
+
+> kubectl create clusterrolebinding node-exporter --clusterrole=cluster-admin --serviceaccount=monitoring:node-exporter
+error: failed to create clusterrolebinding: clusterrolebindings.rbac.authorization.k8s.io "node-exporter" already exists
+```
+
+`clusterrolebinding` говорит такой есть. Возможно он не делится на namescpace. Проверим через `get` . Он конечно дает выполним команду и с пространством имен и без, но вывод одинаковый. Придется наверное дать другое имя
+
+```bash
+> kubectl create clusterrolebinding monitoring:node-exporter --clusterrole=cluster-admin --serviceaccount=monitoring:node-exporter
+clusterrolebinding.rbac.authorization.k8s.io/monitoring:node-exporter created
+```
+
+Окей, вернемся к демонсету. А он тем, времинем починился, сразу, как я пользователя в правильном пространстве имен создал
+
+```bash
+Type     Reason            Age                     From                  Message
+  ----     ------            ----                    ----                  -------
+  Warning  FailedCreate      7m48s (x15 over 9m10s)  daemonset-controller  Error creating: pods "node-exporter-" is forbidden: error looking up service account monitoring/node-exporter: serviceaccount "node-exporter" not found
+  Normal   SuccessfulCreate  6m26s                   daemonset-controller  Created pod: node-exporter-4xmbf
+  Normal   SuccessfulCreate  6m26s                   daemonset-controller  Created pod: node-exporter-47rnr
+  Normal   SuccessfulCreate  6m26s                   daemonset-controller  Created pod: node-exporter-7xmkk
+  Normal   SuccessfulCreate  6m26s                   daemonset-controller  Created pod: node-exporter-t9xrb
+  Normal   SuccessfulCreate  6m26s                   daemonset-controller  Created pod: node-exporter-9v8kr
+  Normal   SuccessfulCreate  6m26s                   daemonset-controller  Created pod: node-exporter-xnlzq
+
+>kubectl get pods -n monitoring 
+NAME                  READY   STATUS    RESTARTS   AGE
+node-exporter-47rnr   2/2     Running   0          7m38s
+node-exporter-4xmbf   2/2     Running   0          7m38s
+node-exporter-7xmkk   2/2     Running   0          7m38s
+node-exporter-9v8kr   2/2     Running   0          7m38s
+node-exporter-t9xrb   2/2     Running   0          7m38s
+node-exporter-xnlzq   2/2     Running   0          7m38s
+```
+
+Прокину порты с выводом
+
+```bash
+> kubectl port-forward node-exporter-47rnr 9100:9100 -n monitoring
+Forwarding from 127.0.0.1:9100 -> 9100
+Forwarding from [::1]:9100 -> 9100
+Handling connection for 9100
+E0416 18:44:10.094800    6508 portforward.go:233] lost connection to pod
+```
+
+```bash
+> curl localhost:9100/metrics
+# HELP go_gc_duration_seconds A summary of the pause duration of garbage collection cycles.
+# TYPE go_gc_duration_seconds summary
+
+# ... 100500 строк
+
+# TYPE promhttp_metric_handler_requests_in_flight gauge
+promhttp_metric_handler_requests_in_flight 1
+# HELP promhttp_metric_handler_requests_total Total number of scrapes by HTTP status code.
+# TYPE promhttp_metric_handler_requests_total counter
+promhttp_metric_handler_requests_total{code="200"} 0
+promhttp_metric_handler_requests_total{code="500"} 0
+promhttp_metric_handler_requests_total{code="503"} 0
+```
+
+Ну, вроде работает
 
 # Часть 7 ⭐⭐ | DaemonSet
+
+Добавил в `tolerations`. 
+
+```yaml
+- key: node-role.kubernetes.io/master
+  effect: NoSchedule
+```
+
+Вот [тут](https://kubernetes.io/docs/concepts/workloads/controllers/daemonset/#create-a-daemonset) пишут `this toleration is to have the daemonset runnable on master nodes`
+
+Проверяю
+
+```yaml
+>kubectl apply -f node-exporter-daemonset.yaml | kubectl get pod -n monitoring -w
+NAME                  READY   STATUS    RESTARTS   AGE
+node-exporter-47rnr   2/2     Running   0          18m
+node-exporter-4xmbf   2/2     Running   0          18m
+node-exporter-7xmkk   2/2     Running   0          18m
+node-exporter-9v8kr   2/2     Running   0          18m
+node-exporter-t9xrb   2/2     Running   0          18m
+node-exporter-xnlzq   2/2     Running   0          18m
+node-exporter-9v8kr   2/2     Terminating   0          18m
+node-exporter-9v8kr   0/2     Terminating   0          18m
+node-exporter-9v8kr   0/2     Terminating   0          18m
+node-exporter-9v8kr   0/2     Terminating   0          18m
+node-exporter-gjlfb   0/2     Pending       0          0s
+node-exporter-gjlfb   0/2     Pending       0          0s
+node-exporter-gjlfb   0/2     ContainerCreating   0          0s
+node-exporter-gjlfb   2/2     Running             0          2s
+node-exporter-4xmbf   2/2     Terminating         0          18m
+node-exporter-4xmbf   0/2     Terminating         0          18m
+node-exporter-4xmbf   0/2     Terminating         0          18m
+node-exporter-4xmbf   0/2     Terminating         0          18m
+node-exporter-x47lx   0/2     Pending             0          0s
+node-exporter-x47lx   0/2     Pending             0          0s
+node-exporter-x47lx   0/2     ContainerCreating   0          0s
+node-exporter-x47lx   2/2     Running             0          2s
+node-exporter-47rnr   2/2     Terminating         0          18m
+node-exporter-47rnr   0/2     Terminating         0          18m
+node-exporter-47rnr   0/2     Terminating         0          18m
+node-exporter-47rnr   0/2     Terminating         0          18m
+node-exporter-vhksx   0/2     Pending             0          0s
+node-exporter-vhksx   0/2     Pending             0          0s
+node-exporter-vhksx   0/2     ContainerCreating   0          0s
+node-exporter-vhksx   2/2     Running             0          2s
+node-exporter-t9xrb   2/2     Terminating         0          18m
+node-exporter-t9xrb   0/2     Terminating         0          18m
+node-exporter-t9xrb   0/2     Terminating         0          19m
+node-exporter-t9xrb   0/2     Terminating         0          19m
+node-exporter-ht7qk   0/2     Pending             0          0s
+node-exporter-ht7qk   0/2     Pending             0          0s
+node-exporter-ht7qk   0/2     ContainerCreating   0          0s
+node-exporter-ht7qk   2/2     Running             0          1s
+node-exporter-xnlzq   2/2     Terminating         0          19m
+node-exporter-xnlzq   0/2     Terminating         0          19m
+node-exporter-xnlzq   0/2     Terminating         0          19m
+node-exporter-xnlzq   0/2     Terminating         0          19m
+node-exporter-v6n7h   0/2     Pending             0          0s
+node-exporter-v6n7h   0/2     Pending             0          0s
+node-exporter-v6n7h   0/2     ContainerCreating   0          0s
+node-exporter-v6n7h   2/2     Running             0          2s
+node-exporter-7xmkk   2/2     Terminating         0          19m
+node-exporter-7xmkk   0/2     Terminating         0          19m
+node-exporter-7xmkk   0/2     Terminating         0          19m
+node-exporter-7xmkk   0/2     Terminating         0          19m
+node-exporter-7hnzx   0/2     Pending             0          0s
+node-exporter-7hnzx   0/2     Pending             0          0s
+node-exporter-7hnzx   0/2     ContainerCreating   0          0s
+node-exporter-7hnzx   2/2     Running             0          1s
+
+> kubectl get pods -n monitoring -w 
+NAME                  READY   STATUS    RESTARTS   AGE
+node-exporter-7hnzx   2/2     Running   0          97s
+node-exporter-gjlfb   2/2     Running   0          2m28s
+node-exporter-ht7qk   2/2     Running   0          108s
+node-exporter-v6n7h   2/2     Running   0          102s
+node-exporter-vhksx   2/2     Running   0          119s
+node-exporter-x47lx   2/2     Running   0          2m24s
+
+> kubectl get pods -o=jsonpath='{.items[0:5].spec.nodeName}' -n monitoring
+'kind-control-plane2 kind-worker kind-worker3 kind-control-plane3 kind-control-plane'
+```
