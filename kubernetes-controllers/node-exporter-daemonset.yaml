@@ -21,7 +21,7 @@ spec:
         app.kubernetes.io/name: node-exporter
         app.kubernetes.io/part-of: kube-prometheus
         app.kubernetes.io/version: 1.1.2
-    spec:
+    spec:    
       containers:
         - args:
             - --web.listen-address=127.0.0.1:9100
@@ -87,6 +87,8 @@ spec:
       serviceAccountName: node-exporter
       tolerations:
         - operator: Exists
+        - key: node-role.kubernetes.io/master
+          effect: NoSchedule        
       volumes:
         - hostPath:
             path: /sys
