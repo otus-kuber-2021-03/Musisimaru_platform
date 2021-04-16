@@ -16,4 +16,4 @@ spec:
     spec:
       containers:
         - name: server
-          image: musisimaru/otus-hipstershop-02-paymentservice:0.0.1
+          image: musisimaru/otus-hipstershop-02-paymentservice:0.0.2
