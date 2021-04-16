@@ -295,5 +295,356 @@
     frontend   3         3         3       15m
     ```
 
--
-    -
+# Часть 2 | Обновляем образ в RS
+
+- **Выпустил** новый тэг в хабе и поменял манифест на него
+- **Применил**, подожал пару минут
+
+    ```bash
+    > kubectl apply -f frontend-replicaset.yaml | kubectl get pods -l app=frontend -w
+    NAME             READY   STATUS    RESTARTS   AGE
+    frontend-9b8fg   1/1     Running   0          12h
+    frontend-skprr   1/1     Running   0          12h
+    frontend-xc5m2   1/1     Running   0          12h
+    ```
+
+    Да, ничего не происходит
+
+- Проверяю образ, указанный в RS:
+
+    ```bash
+    > kubectl get replicaset frontend -o=jsonpath='{.spec.template.spec.containers[0].image}'
+    'musisimaru/otus-hipstershop-01:0.0.2'
+
+    > kubectl get pods -l app=frontend -o=jsonpath='{.items[0:3].spec.containers[0].image}'
+    'musisimaru/otus-hipstershop-01:0.0.1 musisimaru/otus-hipstershop-01:0.0.1 musisimaru/otus-hipstershop-01:0.0.1'
+    ```
+
+    Опция `-o` - это output format
+    Может применять значения
+    `json` | `yaml` | `wide` | `name` | `custom-columns=...` | `custom-columns-file=...` | `go-template=...` | `go-template-file=...` | `jsonpath=...` | `jsonpath-file=...`
+
+    [JSONPath Support](https://kubernetes.io/docs/reference/kubectl/jsonpath/)
+
+    Очевидно образы отсались старыми
+
+- Удаляем все созданные поды
+
+    ```bash
+    > kubectl delete pods -l app=frontend
+    pod "frontend-9b8fg" deleted
+    pod "frontend-skprr" deleted
+    pod "frontend-xc5m2" deleted
+
+    > kubectl get pods -l app=frontend -o=jsonpath='{.items[0:3].spec.containers[0].image}'
+    'musisimaru/otus-hipstershop-01:0.0.2 musisimaru/otus-hipstershop-01:0.0.2 musisimaru/otus-hipstershop-01:0.0.2'
+    ```
+
+    Теперь образы новенькие
+
+- **Вопрос:** Почему обновление **ReplicaSet** не повлекло обновление запущенных pod?
+
+    **Ответ:** Потому что ***ReplicationController*** не проверяет соответствие запущенных Podов шаблону
+
+# Часть 3 | Deployment
+
+- **Собираю** образ и публикую для сервиса `paymentService` . Получили два тега `musisimaru/otus-hipstershop-02-paymentservice:0.0.1` и `musisimaru/otus-hipstershop-02-paymentservice:0.0.2`
+- **Пишу** `paymentservice-replicaset.yaml` . Применяю. Разворачивается 3 пода.
+
+    ```bash
+    >kubectl get pod -l app=paymentservice -w
+    NAME                   READY   STATUS              RESTARTS   AGE
+    paymentservice-5cz9d   0/1     ContainerCreating   0          50s
+    paymentservice-msctd   0/1     ContainerCreating   0          50s
+    paymentservice-tx6j5   0/1     ContainerCreating   0          50s
+    paymentservice-msctd   1/1     Running             0          57s
+    paymentservice-5cz9d   1/1     Running             0          58s
+    paymentservice-tx6j5   1/1     Running             0          59s
+    ```
+
+    **удаляю** rs
+
+- **Копирую** `paymentservice-replicaset.yaml` переименовываю в `paymentservice-deployment.yaml` и меняю kind на `Deployment`. **Применяю**
+
+    ```bash
+    > kubectl apply -f paymentservice-deployment.yaml
+    deployment.apps/paymentservice created 
+
+    > kubectl get pod -l app=paymentservice -w
+    NAME                              READY   STATUS    RESTARTS   AGE
+    paymentservice-57b4459765-4n24z   1/1     Running   0          4s
+    paymentservice-57b4459765-cvtqr   1/1     Running   0          4s
+    paymentservice-57b4459765-hpgqb   1/1     Running   0          4s
+
+    > kubectl get deployment 
+    NAME             READY   UP-TO-DATE   AVAILABLE   AGE
+    paymentservice   3/3     3            3           18s
+
+    > kubectl get rs -l app=paymentservice
+    NAME                        DESIRED   CURRENT   READY   AGE
+    paymentservice-57b4459765   3         3         3       2m14s
+    ```
+
+- Меняю версию образа. Применяю
+
+    ```bash
+    > kubectl apply -f paymentservice-deployment.yaml | kubectl get pods -l app=paymentservice -w
+    NAME                              READY   STATUS    RESTARTS   AGE
+    paymentservice-57b4459765-4n24z   1/1     Running   0          5m9s
+    paymentservice-57b4459765-cvtqr   1/1     Running   0          5m9s
+    paymentservice-57b4459765-hpgqb   1/1     Running   0          5m9s
+    paymentservice-84895fbb4-gx9t4    0/1     Pending   0          0s
+    paymentservice-84895fbb4-gx9t4    0/1     Pending   0          0s
+    paymentservice-84895fbb4-gx9t4    0/1     ContainerCreating   0          0s
+    paymentservice-84895fbb4-gx9t4    1/1     Running             0          3s
+    paymentservice-57b4459765-cvtqr   1/1     Terminating         0          5m12s
+    paymentservice-84895fbb4-lfkmv    0/1     Pending             0          0s
+    paymentservice-84895fbb4-lfkmv    0/1     Pending             0          0s
+    paymentservice-84895fbb4-lfkmv    0/1     ContainerCreating   0          0s
+    paymentservice-84895fbb4-lfkmv    1/1     Running             0          2s
+    paymentservice-57b4459765-hpgqb   1/1     Terminating         0          5m14s
+    paymentservice-84895fbb4-8bxcb    0/1     Pending             0          0s
+    paymentservice-84895fbb4-8bxcb    0/1     Pending             0          0s
+    paymentservice-84895fbb4-8bxcb    0/1     ContainerCreating   0          0s
+    paymentservice-84895fbb4-8bxcb    1/1     Running             0          3s
+    paymentservice-57b4459765-4n24z   1/1     Terminating         0          5m17s
+    paymentservice-57b4459765-cvtqr   0/1     Terminating         0          5m43s
+    paymentservice-57b4459765-hpgqb   0/1     Terminating         0          5m45s
+    paymentservice-57b4459765-4n24z   0/1     Terminating         0          5m48s
+    paymentservice-57b4459765-cvtqr   0/1     Terminating         0          5m50s
+    paymentservice-57b4459765-cvtqr   0/1     Terminating         0          5m50s
+    paymentservice-57b4459765-hpgqb   0/1     Terminating         0          5m50s
+    paymentservice-57b4459765-hpgqb   0/1     Terminating         0          5m50s
+    paymentservice-57b4459765-4n24z   0/1     Terminating         0          6m 
+    paymentservice-57b4459765-4n24z   0/1     Terminating         0          6m
+
+    > kubectl get pods -l app=paymentservice -o=jsonpath='{.items[0:3].spec.containers[0].image}'
+    'musisimaru/otus-hipstershop-02-paymentservice:0.0.2 musisimaru/otus-hipstershop-02-paymentservice:0.0.2 musisimaru/otus-hipstershop-02-paymentservice:0.0.2'
+
+    > kubectl get rs -l app=paymentservice                                                                                           
+    NAME                        DESIRED   CURRENT   READY   AGE
+    paymentservice-57b4459765   0         0         0       101m
+    paymentservice-84895fbb4    3         3         3       96m
+
+    > kubectl get rs -l app=paymentservice -o=jsonpath='{.items[0:2].spec.template.spec.containers[0].image}' 
+    'musisimaru/otus-hipstershop-02-paymentservice:0.0.1 musisimaru/otus-hipstershop-02-paymentservice:0.0.2'
+    ```
+
+    Образ обновился. RS две, старая имеет старый образ и контролирует 0 подов 
+
+- Смотрю историю версий Deployment
+
+    ```bash
+    > kubectl rollout history deployment paymentservice
+    deployment.apps/paymentservice 
+    REVISION  CHANGE-CAUSE
+    1         <none>
+    2         <none>
+    ```
+
+- Делаю откат
+
+    ```bash
+    > kubectl rollout undo deployment paymentservice --to-revision=1 | kubectl get rs -l app=paymentservice -w
+    NAME                        DESIRED   CURRENT   READY   AGE
+    paymentservice-57b4459765   0         0         0       107m
+    paymentservice-84895fbb4    3         3         3       101m
+    paymentservice-57b4459765   0         0         0       107m
+    paymentservice-57b4459765   1         0         0       107m
+    paymentservice-57b4459765   1         0         0       107m
+    paymentservice-57b4459765   1         1         0       107m
+    paymentservice-57b4459765   1         1         1       107m
+    paymentservice-84895fbb4    2         3         3       101m
+    paymentservice-57b4459765   2         1         1       107m
+    paymentservice-84895fbb4    2         3         3       101m
+    paymentservice-84895fbb4    2         2         2       101m
+    paymentservice-57b4459765   2         1         1       107m
+    paymentservice-57b4459765   2         2         1       107m
+    paymentservice-57b4459765   2         2         2       107m
+    paymentservice-84895fbb4    1         2         2       101m
+    paymentservice-84895fbb4    1         2         2       101m
+    paymentservice-57b4459765   3         2         2       107m
+    paymentservice-57b4459765   3         2         2       107m
+    paymentservice-84895fbb4    1         1         1       101m
+    paymentservice-57b4459765   3         3         2       107m
+    paymentservice-57b4459765   3         3         3       107m
+    paymentservice-84895fbb4    0         1         1       101m
+    paymentservice-84895fbb4    0         1         1       101m
+    paymentservice-84895fbb4    0         0         0       101m
+
+    > kubectl rollout history deployment paymentservice
+    deployment.apps/paymentservice 
+    REVISION  CHANGE-CAUSE
+    2         <none>
+    3         <none>
+
+    > kubectl get rs -l app=paymentservice
+    NAME                        DESIRED   CURRENT   READY   AGE
+    paymentservice-57b4459765   3         3         3       111m
+    paymentservice-84895fbb4    0         0         0       106m
+
+    > kubectl get pods -l app=paymentservice
+    NAME                              READY   STATUS    RESTARTS   AGE
+    paymentservice-57b4459765-4ncpj   1/1     Running   0          5m18s
+    paymentservice-57b4459765-b6qb9   1/1     Running   0          5m20s
+    paymentservice-57b4459765-ngf6h   1/1     Running   0          5m19s
+    ```
+
+# Часть 4 ⭐ | Аналог blue-green и Reverse Rolling Update
+
+Выдержки из документации
+
+`maxSurge` - это необязательное поле определяющее максимальное кол-во подов, которое может быть создано сверх желаемого кол-ва подов. Значение может быть абсолютным кол-вом или в процентах желаемых подов  (например, 10%). Значение не может быть 0 если `MaxUnavailable` будет `0` . Кол-во вычисляется из процента путем округления в большую сторону. Значение по-умолчанию 25%.
+
+Например, когда значение стоит 30% новый ReplicaSet может быть расширен немедленно когда начата rolling update, при этом абсолютное кол-во старых и новых подов не превышает 130% от желаемого кол-ва.
+
+`Max Unavailable` - это необязательное поле определяющее максимальное кол-во подов, которые могут быть не доступны пока идет процесс обновления. Значение может быть абсолютным кол-вом или процентом от желаемых подов. Кол-во вычисляется из процента путем округления в меньшую сторону. Значение не может быть 0 если `maxSurge` будет `0` . Значение по-умолчанию 25%
+
+Например, когда это значение задано 30%, то старый ReplicaSet может сузиться до 70% от желаемого кол-ва в тот же момент, как начинается rolling update. Как только новый под готов, старый ReplicaSet может сужаться дальше, преследуя расширение нового ReplicaSet, убеждаясь при этом, что полное кол-во достумных подов в любое время всего обновления не ниже 70% от желаемого кол-ва
+
+## Аналог blue-green
+
+По сути эта задача подразумевает, что не должно быть ни секунды когда наш сервис был бы не доступен. В здании приводится алгоритм - сначала развернулись все новые, потом свернулись все старые:
+
+1. Развертывание трех новых pod
+2. Удаление трех старых pod
+
+Значит требуется в первую очередь указать `Max Unavailable` как `0` , что должно обеспечить ключевое условие подхода и указать `maxSurge` в значении 100%, чтобы условие удовлетворяло заданному в задании алгоритму. Пробуем.
+
+Пробуем 
+
+```bash
+> kubectl apply -f paymentservice-deployment-bg.yaml | kubectl get pods -l app=paymentservice -w 
+NAME                              READY   STATUS    RESTARTS   AGE
+paymentservice-57b4459765-4ncpj   1/1     Running   0          75m
+paymentservice-57b4459765-b6qb9   1/1     Running   0          76m
+paymentservice-57b4459765-ngf6h   1/1     Running   0          75m
+paymentservice-84895fbb4-mksjq    0/1     Pending   0          0s
+paymentservice-84895fbb4-g7t2s    0/1     Pending   0          0s
+paymentservice-84895fbb4-lww7n    0/1     Pending   0          0s
+paymentservice-84895fbb4-mksjq    0/1     Pending   0          0s
+paymentservice-84895fbb4-g7t2s    0/1     Pending   0          0s
+paymentservice-84895fbb4-lww7n    0/1     Pending   0          0s
+paymentservice-84895fbb4-g7t2s    0/1     ContainerCreating   0          1s
+paymentservice-84895fbb4-lww7n    0/1     ContainerCreating   0          1s
+paymentservice-84895fbb4-mksjq    0/1     ContainerCreating   0          1s
+paymentservice-84895fbb4-mksjq    1/1     Running             0          2s
+paymentservice-57b4459765-4ncpj   1/1     Terminating         0          76m
+paymentservice-84895fbb4-g7t2s    1/1     Running             0          2s
+paymentservice-84895fbb4-lww7n    1/1     Running             0          2s
+paymentservice-57b4459765-b6qb9   1/1     Terminating         0          76m
+paymentservice-57b4459765-ngf6h   1/1     Terminating         0          76m
+paymentservice-57b4459765-4ncpj   0/1     Terminating         0          76m
+paymentservice-57b4459765-ngf6h   0/1     Terminating         0          76m
+paymentservice-57b4459765-b6qb9   0/1     Terminating         0          76m
+paymentservice-57b4459765-4ncpj   0/1     Terminating         0          76m
+paymentservice-57b4459765-4ncpj   0/1     Terminating         0          76m
+paymentservice-57b4459765-ngf6h   0/1     Terminating         0          76m
+paymentservice-57b4459765-ngf6h   0/1     Terminating         0          76m
+paymentservice-57b4459765-b6qb9   0/1     Terminating         0          77m
+paymentservice-57b4459765-b6qb9   0/1     Terminating         0          77m
+
+> kubectl get pods -l app=paymentservice                                                     
+NAME                             READY   STATUS    RESTARTS   AGE
+paymentservice-84895fbb4-g7t2s   1/1     Running   0          3m5s
+paymentservice-84895fbb4-lww7n   1/1     Running   0          3m5s
+paymentservice-84895fbb4-mksjq   1/1     Running   0          3m5s
+```
+
+Вроде похоже
+
+**Попробую** укзаать не в процентах а в абсолютном кол-ве. Все также сработало
+
+## Reverse Rolling Update
+
+Смысл видимо сделать так, чтобы каждый под менялся по очереди.
+
+1. Удаление одного старого pod
+2. Создание одного нового pod
+3. ...
+
+Также попробую и в числах и в процентах
+
+**Выставлю** `maxSurge` в значение 0 - это обеспечит условие того, что сначала будем удалять, а потом создавать. А `Max Unavailable` укажем, как `1` или `35%`
+
+**Пробую** с единицей
+
+```bash
+> kubectl apply -f paymentservice-deployment-reverse.yaml | kubectl get pods -l app=paymentservice -w
+NAME                              READY   STATUS    RESTARTS   AGE
+paymentservice-57b4459765-6bb8l   1/1     Running   0          3m44s
+paymentservice-57b4459765-9lk42   1/1     Running   0          3m44s
+paymentservice-57b4459765-fwd79   1/1     Running   0          3m44s
+paymentservice-57b4459765-9lk42   1/1     Terminating   0          3m44s
+paymentservice-84895fbb4-qfbhb    0/1     Pending       0          0s
+paymentservice-84895fbb4-qfbhb    0/1     Pending       0          0s
+paymentservice-84895fbb4-qfbhb    0/1     ContainerCreating   0          0s
+paymentservice-84895fbb4-qfbhb    1/1     Running             0          2s
+paymentservice-57b4459765-6bb8l   1/1     Terminating         0          3m46s
+paymentservice-84895fbb4-hp8fs    0/1     Pending             0          0s
+paymentservice-84895fbb4-hp8fs    0/1     Pending             0          0s
+paymentservice-84895fbb4-hp8fs    0/1     ContainerCreating   0          0s
+paymentservice-84895fbb4-hp8fs    1/1     Running             0          1s
+paymentservice-57b4459765-fwd79   1/1     Terminating         0          3m47s
+paymentservice-84895fbb4-j67hz    0/1     Pending             0          0s
+paymentservice-84895fbb4-j67hz    0/1     Pending             0          0s
+paymentservice-84895fbb4-j67hz    0/1     ContainerCreating   0          0s
+paymentservice-84895fbb4-j67hz    1/1     Running             0          1s
+paymentservice-57b4459765-9lk42   0/1     Terminating         0          4m15s
+```
+
+**Пробую** с 35%. Все также
+
+# Часть 5 | Probes
+
+**Написал** `т frontend-deployment.yaml` , добавил `readinessProbe` . Применил. Поднялись 3 пода.
+
+**Смотрю** что написано. Есть вот такая вот строка
+
+```yaml
+Readiness: http-get http://:8080/_healthz delay=10s timeout=1s period=10s #success=1 #failure=3
+```
+
+**Меняю** в описании пробы `_healthz` на `_health` и тэг образа.
+
+**Применяю**
+
+```bash
+> kubectl apply -f frontend-deployment.yaml | kubectl get pod -l app=frontend -w
+NAME                        READY   STATUS    RESTARTS   AGE  
+frontend-584bd48b44-b4g58   1/1     Running   0          5m35s
+frontend-584bd48b44-lb57b   1/1     Running   0          5m35s
+frontend-584bd48b44-rlprj   1/1     Running   0          5m35s
+frontend-b5b97c669-w6fv7    0/1     Pending   0          0s
+frontend-b5b97c669-w6fv7    0/1     Pending   0          0s
+frontend-b5b97c669-w6fv7    0/1     ContainerCreating   0          0s
+frontend-b5b97c669-w6fv7    0/1     Running             0          2s
+```
+
+Похоже завис на развертывании первого пода.
+
+Вижу среди событий пода
+
+```bash
+Events:
+  Type     Reason     Age                 From               Message
+  ----     ------     ----                ----               -------
+  Normal   Scheduled  2m13s               default-scheduler  Successfully assigned default/frontend-b5b97c669-w6fv7 to kind-worker2
+  Normal   Pulled     2m12s               kubelet            Container image "musisimaru/otus-hipstershop-01:0.0.2" already present on machine
+  Normal   Created    2m12s               kubelet            Created container server
+  Normal   Started    2m12s               kubelet            Started container server
+  Warning  Unhealthy  6s (x12 over 116s)  kubelet            Readiness probe failed: HTTP probe failed with statuscode: 404
+```
+
+Смотрю статус
+
+```bash
+> kubectl rollout status deployment/frontend
+Waiting for deployment "frontend" rollout to finish: 1 out of 3 new replicas have been updated...
+```
+
+# Часть 6 ⭐ | DaemonSet
+
+...
+
+# Часть 7 ⭐⭐ | DaemonSet
